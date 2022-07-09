@@ -1,0 +1,627 @@
+---
+title: |
+  ![](C:/Users/maryc/OneDrive/Desktop/Data_Applications/Project_2/spotify_2.png){height=395px}  
+  
+  
+  <center><div class='mytitle'>Spotify Song Popularity Analysis</div></center>
+#author: "Mary Aldrete"
+output:
+  html_document:
+    toc: TRUE
+    code_folding: hide
+---
+
+
+<style>
+.nav>li>a {
+    position: relative;
+    display: block;
+    padding: 10px 15px;
+    color: #000000;
+}
+.nav-pills>li.active>a, .nav-pills>li.active>a:hover, .nav-pills>li.active>a:focus {
+    color: #FFFFFF;
+    background-color: #1DB954;
+}
+
+
+</style>
+
+<style>
+a:link {
+    color: black;
+}
+
+a:visited {
+    color: black;
+}
+
+ a:hover {
+    color: 	#1DB954;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Introduction 
+
+The Recording Industry Association of America reports that 75% of revenue in the music industry is from steaming. Spotify has 286 million active users and is listed as the best music streaming service. Since Spotify is very relevant to the music industry, many artists rely on it for profit. Spotify only pays \$.003 to $.005 per stream, and an artist can make between \$3 to \$5 per 1,000 streams. 
+
+To help artists earn money on Spotify, the popularity metric will be investigated. Having a high popularity index means the algorithm is more likely to recommend a song to new listeners and put the song into playlists curated by the algorithm. The more exposure the song gets, the more streams it will garner. 
+
+
+This analysis aims to answer the following questions: <br />
+1. What features make a song popular?  <br />
+2. How well can popularity be predicted?  <br />
+
+
+# Loading Packages
+
+
+Before I run the analysis, I am loading all necessary packages. The packages I am using are for data cleaning, data visualization, and machine learning. 
+
+
+```{r, results='hide',warning=FALSE,message=FALSE}
+#Loading packages
+# Package names
+packages <- c("tidyverse", "ggcorrplot", "randomForest", "here", "knitr", "tree", "gbm", 
+              "e1071", "randomForestSRC", "caret", "ROCR", "car", 
+              "rpart", "readr", "DescTools", "MASS", "rstatix", "viridis", 
+              "rattle", "pdp","rmarkdown", "scales")
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+
+
+
+# Reading the data
+
+Opening the csv file and loading it into R. 
+
+```{r}
+spotify = read.csv("data.csv", header = TRUE)
+```
+
+
+
+# Data Cleaning {.tabset .tabset-fade .tabset-pills}
+
+## Data Types
+
+Checking the structure of the data to make sure the data types of the variables are correct. Some variables need to be transformed into another type. 
+
+```{r}
+str(spotify)
+```
+
+Explicit, Mode, and Key are factor variables, however, R interpreted them as numeric. To make sure our analysis is done correctly, we must change Explicit, Mode, and Key to their proper variable type. 
+
+```{r}
+spotify$explicit[spotify$explicit == 1] = "Explicit"
+spotify$explicit[spotify$explicit == 0] = "Not explicit"
+spotify$explicit = as.factor(spotify$explicit)
+
+spotify$mode[spotify$mode == 1] = "Major"
+spotify$mode[spotify$mode == 0] = "Minor"
+spotify$mode = as.factor(spotify$mode)
+
+
+
+spotify$key = as.factor(spotify$key)
+
+```
+
+Double checking the structure to make sure the changes were correctly implemented. 
+
+```{r}
+str(spotify)
+```
+
+## Missing Values
+
+There are no missing values in this data set. 
+
+```{r}
+sum(is.na(spotify))
+```
+## Converting Duration Variable 
+
+The duration variable is in milliseconds which is too small for this analysis. When discussing the length of a song, minutes is a better metric, so milliseconds will be converted into minutes. 
+
+```{r}
+spotify = 
+  spotify %>% 
+  dplyr::mutate(duration_min = duration_ms/60000)
+```
+
+
+## Filtering Data
+
+For this analysis, I want to focus on songs from the past 5 years, so I am looking at music that is relevant to the music scene. I'm creating a new data set that only has music from 2016-2020. 
+
+```{r}
+spotify.past.5 = spotify %>% 
+  filter(year == 2016 | year == 2017 |
+           year == 2018 | year == 2019 | year == 2020)
+```
+
+# {.unlisted .unnumbered}
+
+# Data Exploration {.tabset .tabset-fade .tabset-pills}
+
+## Count of Song Keys 
+
+Most songs are written in the key of G, C, and C#. The key of D# is used the least. 
+
+
+```{r}
+#changing the factor levels of Key so they show up correctly on the visualization
+spotify.past.5$key = factor(spotify.past.5$key, levels = c("7", "0", "1", "9", 
+                                                           "2", "11", "5", "4",
+                                                           "6", "10", "8", "3"))
+ggplot(spotify.past.5, aes(x = forcats::fct_infreq(key)))   +
+  geom_bar(aes(fill = key), stat = "count", position = "dodge") +
+  labs(title= "Count of Key of Songs from 2016-2020", y = "Count", x = "Key") +
+  scale_color_viridis(discrete = TRUE) +
+  scale_y_continuous(label = scales::comma) +
+  scale_x_discrete(breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,11), labels = c("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")) +
+  scale_fill_manual(values = c("#440154", "#482173", "#433e85", "#38588c", "#2d708e",
+                               "#25858e", "#1e9b8a", "#2ab07f", "#52c569", "#86d549", 
+                               "#c2df23", "#fde725")) +
+  theme(legend.position="none") 
+
+```
+
+
+
+
+
+## Count of Mode
+
+Most songs are Major. 
+
+
+```{r}
+
+
+ggplot(spotify.past.5, aes(x = mode)) +
+  geom_bar(aes(fill = mode), stat = "count", position = "dodge") +
+  labs(title= "Count of Mode of Songs from 2016-2020", y = "Count", x = "Mode") +
+  scale_y_continuous(label = scales::comma) +
+  scale_x_discrete(breaks = c("Major", "Minor"), labels = c("Major", "Minor")) +
+  scale_fill_manual(values = c("#440154", "#fde725")) +
+  theme(legend.position="none") 
+
+```
+
+## Count of Explicit and Non Explicit
+
+Most songs are not explicit. 
+
+
+```{r}
+#changing the factor levels of Explicit so they show up correctly on the visualization
+spotify.past.5$explicit = factor(spotify.past.5$explicit, levels = c("Not explicit","Explicit"))
+
+ggplot(spotify.past.5, aes(x = explicit)) +
+  geom_bar(aes(fill = explicit), stat = "count", position = "dodge") +
+  labs(title= "Count of Explicit and Non Explicit Songs from 2016-2020", y = "Count", x = "Explicit") +
+  scale_y_continuous(label = scales::comma) +
+  scale_x_discrete(breaks = c("Explicit", "Not explicit"), labels = c("Explicit", "Not Explicit")) +
+  scale_fill_manual(values = c("#440154", "#fde725")) +
+  theme(legend.position="none") 
+
+
+```
+
+
+## Correlations
+
+
+
+Examining the correlations of the numeric variables.
+
+Acousticness and energy have a high negative correlation (r = -0.68) meaning as the acousticness increases, energy decreases. Acousticness and loudness have a high negative correlation (r = -52) meaning as the acoustincess increases, loudness decreases.
+
+```{r, results='hide'}
+cordata3 <- spotify.past.5 %>% 
+  dplyr::select(acousticness, danceability, energy, duration_ms, instrumentalness, valence, tempo, liveness, loudness, speechiness)
+
+cormatrix3 <- cor(cordata3)
+
+round(cormatrix3, 2)
+```
+
+```{r}
+ggcorrplot(cormatrix3, hc.order = TRUE,outline.color = "white", lab = TRUE, colors = c("#52c569", "white", "#fde725"), lab_size = 2.5) +
+  labs(title="Correlation of Numeric Variables") 
+```
+
+
+## Histograms of Numeric Variables
+
+In the histogram, we can observe that acoustincess, duration, instrumentalness, liveness, popularity, and speechiness are right skewed. Energy, loudness, and danceability are left skewed. 
+
+
+```{r, warning=FALSE, message=FALSE}
+spotify.past.5%>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+  facet_wrap(~ key, scales = "free") +
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#3399CC") +
+   labs(title= "Distribution of Numeric Variables")
+
+```
+
+
+
+## Distribution of Mode
+
+The distribution of popularity in major and minor songs is the same. 
+
+
+```{r}
+ggplot(spotify.past.5, aes(y = popularity, x = mode, fill = mode)) + 
+  geom_violin() +
+  labs(title= "Distribution of Mode of Songs from 2016-2020", y = "Popularity", x = "Mode") +
+  scale_fill_manual(values = c("#440154", "#fde725")) +
+  theme(legend.position="none")
+
+```
+
+## Distribution of Explicit
+
+
+Most explicit songs fall into the high popularity range and non explicit songs fall in the low popularity range. 
+
+```{r}
+ggplot(spotify.past.5, aes(y = popularity, x = explicit, fill = explicit)) + 
+  geom_violin() +
+  labs(title= "Distribution of Explicit of Songs from 2016-2020", y = "Popularity", x = "Explicit") +
+  scale_fill_manual(values = c("#440154", "#fde725")) +
+  theme(legend.position="none")
+```
+
+
+## Distribution of Keys
+
+
+The keys have a very similar distribution in popularity. 
+
+```{r}
+ggplot(spotify.past.5, aes(y = popularity, x = key, fill = key)) + 
+  geom_violin() +
+  labs(title= "Distribution of Key of Songs from 2016-2020", y = "Popularity", x = "Key") +
+ # scale_fill_discrete(name = "Key", labels = c("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")) +
+  scale_x_discrete(breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,11), labels = c("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")) +
+  scale_fill_manual(values = c("#440154", "#482173", "#433e85", "#38588c", "#2d708e",
+                               "#25858e", "#1e9b8a", "#2ab07f", "#52c569", "#86d549", 
+                               "#c2df23", "#fde725")) +
+  theme(legend.position="none")
+```
+
+# {.unlisted .unnumbered}
+
+
+# ANOVA for Feature Selection {.tabset .tabset-fade .tabset-pills}
+
+To decide if any categorical variables should be kept in the popularity model, I am using ANOVA to test if the categorical variables (explicit, mode, key) have a significant impact on the continuous variable (popularity). The null hypothesis of ANOVA is there is no difference between means. The alternative hypothesis states that there is a difference. If p-value of the ANOVA is greater than .05 then we can reject the null hypothesis and keep the variables in our model. 
+
+
+## ANOVA: Popularity and Explicit 
+
+The results show that there is a significant difference between popularity and explicit (p < .05)
+
+```{r}
+aov.res = aov(popularity~explicit, data = spotify.past.5)
+summary(aov.res)
+```
+
+One of the assumptions in ANOVA is equal variances, so I'm using the Levene's Test to determine whether or not that assumption has been violated. The null hypothesis for the Levene's Test is the variances are equal across groups. The alternative hypothesis for the Levene's Test is the variances are not equal. If the p-value of the Levene's Test is greater than .05, we can accept the null hypothesis and the equal variance assumption of ANOVA will be met. 
+
+The results of the Levene's Test indicate there is equal variance (p > .05)
+
+
+```{r}
+leveneTest(aov.res)
+```
+## ANOVA: Popularity and Mode
+
+The results from this ANOVA show there is no difference between popularity and mode (p > .05). Mode won't be used in the model. 
+
+```{r}
+aov.res.2 = aov(popularity~mode, data = spotify.past.5)
+summary(aov.res.2)
+```
+
+The p-value from the Levene's Test is greater than .05, so the equal variance assumption has been met. 
+
+```{r}
+leveneTest(aov.res.2)
+```
+
+## ANOVA: Popularity and Key
+
+Results from this ANOVA indicate that there is a significant difference between key and popularity (p < .05)
+
+```{r}
+aov.res.3 = aov(popularity~key, data = spotify.past.5)
+summary(aov.res.3)
+```
+The Levene's Test indicates that the equal variance assumption has been violated (p < .05). A Welch's ANOVA will been used since it has failed the homogeneity assumption. 
+
+```{r}
+leveneTest(aov.res.3)
+```
+
+Welch's ANOVA results show that there is a significant difference between popularity and key (p < .05). Key will be kept in the model. 
+
+```{r}
+oneway.test(popularity ~ key, data = spotify.past.5, var.equal = FALSE)
+```
+
+# {.unlisted .unnumbered}
+
+
+# Normalizaing the Data 
+
+In order to have all the data on the same scale, I will apply the min-max normalization technique. This will change the data point scaling, so they have a range between 0 and 1. The difference between each value and the minimum range will be divided by the maximum and minimum value. x - min(x)/max(x) - min(x).
+
+```{r}
+norm = preProcess(spotify.past.5[, c(1,3, 5, 8, 10,11, 16:18, 20)], method = c("range"))
+
+transformed = predict(norm, spotify.past.5[, c(1,3, 5, 8, 10,11, 16:18, 20)])
+
+transformed$popularity = spotify.past.5$popularity
+transformed$explicit = spotify.past.5$explicit
+transformed$key = spotify.past.5$key
+```
+
+
+# {.unlisted .unnumbered}
+
+# Splitting Data Into Test and Train
+
+Splitting data into 80% train and 20% test 
+
+```{r}
+set.seed(1)
+
+idx.train.past.5 = createDataPartition(y=transformed$popularity, p =.8, list =F)
+train.past.5 = transformed[idx.train.past.5,]
+test.past.5 = transformed[-idx.train.past.5,]
+```
+
+
+# Random Forest {.tabset .tabset-fade .tabset-pills}
+
+## Random Forest Results
+
+To predict popularity, random forest will be used. This method was chosen because it can handle outliers, skewed data, and can make predictions very well. Random forest take independent decision trees and aggregates them to come up with a final prediction. Bagging and feature randomness create uncorrelated trees which makes this algorithm powerful. Uncorrelated trees protects each tree from their individual errors; therefore, an aggregate prediction is more accurate than relying on a single decision tree. 
+
+
+
+```{r}
+set.seed(1)
+rf.model = randomForest(popularity ~ 
+                          tempo + 
+                          valence + 
+                          acousticness + 
+                          duration_min + 
+                          instrumentalness + 
+                          liveness  + 
+                          speechiness + 
+                          energy + 
+                          loudness + 
+                          danceability + 
+                          key + 
+                          explicit,
+                          data = train.past.5, importance = TRUE)
+
+print(rf.model)
+```
+
+
+## Variable Importance
+
+The variable importance plot shows that explicit, instrumentalness, loudness, duration, and energy are important to the model. 
+
+```{r}
+varImpPlot(rf.model)
+```
+
+
+## Explicit PDP Plot
+
+
+Explicit songs are predicted to be more popular. 
+
+
+```{r}
+partialPlot(rf.model, train.past.5, explicit, popularity)
+```
+
+
+## Instrumentalness PDP Plot
+
+The more a song is instrumental, the less likely it will be predicted to be high on popularity.  
+
+
+```{r}
+partialPlot(rf.model, train.past.5, instrumentalness, popularity)
+```
+
+
+## Duration PDP Plot
+
+Shorter songs are predicted to be more popular. 
+
+```{r}
+partialPlot(rf.model, train.past.5, duration_min, popularity)
+```
+
+
+## Loudness PDP Plot
+
+Songs that are loud tend to be more popular. 
+
+```{r}
+partialPlot(rf.model, train.past.5, loudness, popularity)
+```
+
+
+
+## Energy PDP Plot
+
+Songs with low to moderate energy are predicted to be more popular. 
+
+
+```{r}
+partialPlot(rf.model, train.past.5, energy, popularity)
+```
+
+
+
+
+## Predictions and Model Evaulation 
+
+Making predictions on the test data and evaluating the model.
+
+
+The random forest accounts for 58% of the variation in the data, has a MSE of 428.4, and a RMSE of 20.7
+
+
+```{r}
+y_hat = predict(rf.model, test.past.5)
+
+
+mse.rf = mean((y_hat - test.past.5$popularity)^2)
+
+
+rf.rmse = caret::RMSE(y_hat,test.past.5$popularity)
+
+rf.r2 = R2(y_hat, test.past.5$popularity)
+
+rf_performance_metrics = 
+  data.frame(R_squared = round(rf.r2,2), 
+             MSE = round(mse.rf,2),
+             RMSE = round(rf.rmse,2))
+
+
+kable(rf_performance_metrics, 
+      col.names = c("R-squared", "MSE", "RMSE"))
+
+```
+
+# {.unlisted .unnumbered}
+
+
+# XGBoost {.tabset .tabset-fade .tabset-pills}
+
+## XGBoost Results
+
+Now we will test if an XGBoost model can outperform the random forest. The trees in gradient boosting are built one after the other, and the trees are built to improve upon the errors from the last tree. This is different than the random forest because that algorithm takes many independent decision trees and aggregates them instead of learning from the errors of a previous tree. 
+
+
+```{r}
+set.seed(1)
+
+xgb.model = train( popularity ~ 
+                          tempo + 
+                          valence + 
+                          acousticness + 
+                          duration_min + 
+                          instrumentalness + 
+                          liveness  + 
+                          speechiness + 
+                          energy + 
+                          loudness + 
+                          danceability + 
+                          key + 
+                          explicit, 
+                          data = train.past.5, 
+                          method = "xgbTree", 
+                          metric = 'Rsquared')
+
+print(xgb.model$finalModel)
+```
+
+
+
+## XGBoost Variable Importance 
+
+The XGBoost's most important variables are similar to the important variables in the random forest. 
+Explicit and instrumentalness are the most impactful variables, followed by duration, loudness, and energy. 
+
+```{r}
+imp = varImp(xgb.model)
+
+plot(imp)
+```
+
+## Predictions and Model Evaulation 
+
+Making predictions on the test data and evaluating the model.
+
+
+The XGBoost accounts for 51% of the variation in the data, has a MSE of 489.7, and a RMSE of 22.13
+
+
+```{r}
+y_hat = predict(xgb.model, test.past.5)
+
+
+mse.xbg = mean((y_hat - test.past.5$popularity)^2)
+
+
+xgb.rmse = caret::RMSE(y_hat,test.past.5$popularity)
+
+xgb.r2 = R2(y_hat, test.past.5$popularity)
+
+
+xgb_performance_metrics = 
+  data.frame(R_squared = round(xgb.r2,2), 
+             MSE = round(mse.xbg,2),
+             RMSE = round(xgb.rmse,2))
+
+
+kable(xgb_performance_metrics, 
+      col.names = c("R-squared", "MSE", "RMSE"))
+
+
+```
+
+
+# {.unlisted .unnumbered}
+
+# Conclusion and Recommendations 
+
+The random forest outperformed the XGBoost model. The random forest accounted for more variation in the data and had a lower MSE and RMSE compared to the XGBoost. 
+
+According to the random forest variable importance plots, explicit, instrumentalness, loudness, duration, and energy are important to the model. The partial dependence plots examined the relationship between those variables and popularity. Based on the partial dependence plots, explicit songs, louder songs, shorter songs, and low to moderate energy songs are predicted to be more popular. 
+
+With this in mind, songs should use those characteristics in order to gain a higher popularity score. It is important to note that music trends are always changing, and depending on how trends change throughout the years, so could the impact of these variables. As the times change, it is recommended to monitor the impact of these variables to determine if they are still relevant or not. 
+
+
+
+
+
+
+
+
+
+
+
